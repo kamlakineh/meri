@@ -1,0 +1,1404 @@
+openapi: 3.1.0
+info:
+  title: Health Platform API
+  version: 0.2.0
+  description: |
+    Contract covering every requirement ID in the platform's requirements doc
+    (Patient P1–P12, Doctor D1–D7, Hospital/Clinic H1–H6, Pharmacy PH1–PH7),
+    plus a minimal Admin surface needed for the approval steps those IDs
+    depend on. Backed today by the mock server in `mock-server/` so web and
+    mobile can build against a stable shape before the real backend exists.
+
+    **Genuinely mocked, by necessity** (would otherwise need a paid
+    provider account): SMS delivery for OTP (`POST /auth/request-otp` returns
+    the code instead of texting it) and payment processing (`Appointment.paymentStatus`
+    is a field you set directly, not a real payment-gateway flow). Everything
+    else in this contract is a real, working implementation in `mock-server/`.
+servers:
+  - url: http://localhost:4000/v1
+    description: Local mock server
+
+security:
+  - mockAuth: []
+
+tags:
+  - name: Search
+    description: Find hospitals, clinics, and pharmacies (P2, P3).
+  - name: Cases
+    description: Patient-submitted cases and doctor triage, including e-prescriptions (P4, P5, D2, D4, D5, P8).
+  - name: Appointments
+    description: Scheduling and status (P6, D3, H4).
+  - name: Chat
+    description: Messaging between patients, doctors, hospitals, and pharmacies (P7, P10, D4, H5, PH5). Voice/video calls are signaled over a WebSocket at `/calls` (see mock-server/README.md), not a REST endpoint.
+  - name: Auth
+    description: Phone + OTP sign-in (P1).
+  - name: Registrations
+    description: Doctor/facility registration and admin approval (D1, H1, PH1).
+  - name: Doctors
+    description: Doctor directory, fees, and availability (P5, D3).
+  - name: Facilities
+    description: Facility profile editing and staff management (H2, H3, PH2).
+  - name: Pharmacy Medicines
+    description: Pharmacy inventory and medicine search (PH3, P9, PH7).
+  - name: Orders
+    description: Medicine ordering and fulfillment (P9, PH4, PH6).
+  - name: Reviews
+    description: Ratings and reviews for facilities and doctors (P12).
+  - name: Articles
+    description: Doctor-authored health articles, admin-reviewed (D6).
+  - name: Payouts
+    description: Doctor earnings/payout history (D7).
+
+paths:
+  /search:
+    get:
+      tags: [Search]
+      summary: Search hospitals, clinics, and pharmacies
+      description: Backs requirement P2 (search) and P3 (list/map results with distance, hours, phone).
+      parameters:
+        - name: query
+          in: query
+          schema: { type: string }
+          description: Free-text match on facility name or service.
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [hospital, clinic, pharmacy]
+        - name: specialty
+          in: query
+          schema: { type: string }
+        - name: service
+          in: query
+          schema: { type: string }
+        - name: openNow
+          in: query
+          schema: { type: boolean }
+        - name: lat
+          in: query
+          schema: { type: number, format: double }
+        - name: lng
+          in: query
+          schema: { type: number, format: double }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [distance, rating, price]
+            default: distance
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Paginated facility results.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Facility' }
+                  pagination: { $ref: '#/components/schemas/Pagination' }
+                required: [data, pagination]
+
+  /facilities/{facilityId}:
+    get:
+      tags: [Search]
+      summary: Get a single facility's profile
+      parameters:
+        - $ref: '#/components/parameters/FacilityId'
+      responses:
+        '200':
+          description: Facility detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Facility' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Facilities]
+      summary: Edit a facility profile (H2, PH2)
+      parameters:
+        - $ref: '#/components/parameters/FacilityId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FacilityUpdateInput' }
+      responses:
+        '200':
+          description: Updated facility.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Facility' }
+
+  /cases:
+    get:
+      tags: [Cases]
+      summary: List cases visible to the caller
+      description: |
+        Role-scoped: a patient sees their own submitted cases; a doctor sees cases
+        routed to them (incoming requests, D2); a hospital/clinic sees cases
+        referred to their facility.
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/CaseStatus' }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Paginated case list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Case' }
+                  pagination: { $ref: '#/components/schemas/Pagination' }
+                required: [data, pagination]
+    post:
+      tags: [Cases]
+      summary: Write a new case (P4)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseCreateInput' }
+      responses:
+        '201':
+          description: Created case.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Case' }
+
+  /cases/{caseId}:
+    get:
+      tags: [Cases]
+      summary: Get a case
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      responses:
+        '200':
+          description: Case detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Case' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Cases]
+      summary: Update a case (accept / decline / refer / add notes) — D2, D4, D5
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseUpdateInput' }
+      responses:
+        '200':
+          description: Updated case.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Case' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /doctors/{doctorId}/availability:
+    get:
+      tags: [Appointments]
+      summary: Get a doctor's available time slots (D3)
+      parameters:
+        - name: doctorId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Available slots.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  doctorId: { type: string }
+                  slots:
+                    type: array
+                    items: { $ref: '#/components/schemas/TimeSlot' }
+                required: [doctorId, slots]
+
+  /appointments:
+    get:
+      tags: [Appointments]
+      summary: List appointments visible to the caller
+      description: Role-scoped — patient's own, a doctor's schedule, or a facility's queue (H4).
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/AppointmentStatus' }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Paginated appointment list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Appointment' }
+                  pagination: { $ref: '#/components/schemas/Pagination' }
+                required: [data, pagination]
+    post:
+      tags: [Appointments]
+      summary: Schedule an appointment (P6)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AppointmentCreateInput' }
+      responses:
+        '201':
+          description: Created appointment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Appointment' }
+
+  /appointments/{appointmentId}:
+    get:
+      tags: [Appointments]
+      summary: Get an appointment
+      parameters:
+        - $ref: '#/components/parameters/AppointmentId'
+      responses:
+        '200':
+          description: Appointment detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Appointment' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Appointments]
+      summary: Update appointment status (confirm / cancel / reschedule / payment)
+      parameters:
+        - $ref: '#/components/parameters/AppointmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AppointmentUpdateInput' }
+      responses:
+        '200':
+          description: Updated appointment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Appointment' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /chats:
+    get:
+      tags: [Chat]
+      summary: List chat threads for the caller (P10, D4, H5, PH5)
+      responses:
+        '200':
+          description: Threads.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChatThread' }
+                required: [data]
+    post:
+      tags: [Chat]
+      summary: Start a new chat thread
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChatThreadCreateInput' }
+      responses:
+        '201':
+          description: Created thread.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatThread' }
+
+  /chats/{chatId}/messages:
+    get:
+      tags: [Chat]
+      summary: List messages in a thread
+      parameters:
+        - $ref: '#/components/parameters/ChatId'
+        - name: after
+          in: query
+          description: Return only messages created after this message id (for polling).
+          schema: { type: string }
+      responses:
+        '200':
+          description: Messages, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChatMessage' }
+                required: [data]
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Chat]
+      summary: Send a message (text or attachment reference)
+      parameters:
+        - $ref: '#/components/parameters/ChatId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChatMessageCreateInput' }
+      responses:
+        '201':
+          description: Created message.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatMessage' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /auth/request-otp:
+    post:
+      tags: [Auth]
+      summary: Request an OTP code (P1)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { phone: { type: string } }
+              required: [phone]
+      responses:
+        '200':
+          description: Dev-mode OTP response — includes the code since no real SMS is sent.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  phone: { type: string }
+                  devCode: { type: string }
+                  expiresInSeconds: { type: integer }
+
+  /auth/verify-otp:
+    post:
+      tags: [Auth]
+      summary: Verify an OTP code and get/create a patient account (P1)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone: { type: string }
+                code: { type: string }
+                name: { type: string, description: "Used only when creating a brand-new account." }
+              required: [phone, code]
+      responses:
+        '200':
+          description: The signed-in (or newly created) user.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { user: { $ref: '#/components/schemas/User' } }
+        '401': { $ref: '#/components/responses/NotFound' }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Refetch the caller's own user record (e.g. to poll registrationStatus)
+      responses:
+        '200':
+          description: Current user.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { user: { $ref: '#/components/schemas/User' } }
+
+  /registrations:
+    post:
+      tags: [Registrations]
+      summary: Register a doctor or facility account (D1, H1, PH1)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegistrationCreateInput' }
+      responses:
+        '201':
+          description: Created registration + the new (pending) user.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  registration: { $ref: '#/components/schemas/Registration' }
+                  user: { $ref: '#/components/schemas/User' }
+    get:
+      tags: [Registrations]
+      summary: List registrations (admin approval queue)
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/RegistrationStatus' }
+      responses:
+        '200':
+          description: Registrations, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Registration' }
+
+  /registrations/{registrationId}:
+    patch:
+      tags: [Registrations]
+      summary: Approve or reject a registration (admin only)
+      parameters:
+        - name: registrationId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { status: { type: string, enum: [approved, rejected] } }
+              required: [status]
+      responses:
+        '200':
+          description: Updated registration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Registration' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /doctors:
+    get:
+      tags: [Doctors]
+      summary: List doctors (P5)
+      parameters:
+        - name: specialty
+          in: query
+          schema: { type: string }
+        - name: facilityId
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Doctors.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Doctor' }
+
+  /doctors/{doctorId}:
+    get:
+      tags: [Doctors]
+      summary: Get a doctor profile
+      parameters:
+        - name: doctorId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Doctor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Doctor' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Doctors]
+      summary: Update fee and/or weekly availability (D3)
+      parameters:
+        - name: doctorId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                consultationFee: { type: number }
+                weeklyAvailability:
+                  type: array
+                  items: { $ref: '#/components/schemas/WeeklyAvailabilitySlot' }
+      responses:
+        '200':
+          description: Updated doctor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Doctor' }
+
+  /doctors/{doctorId}/payouts:
+    get:
+      tags: [Payouts]
+      summary: Earnings/payout history (D7)
+      parameters:
+        - name: doctorId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Payouts, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Payout' }
+
+  /facilities/{facilityId}/staff:
+    get:
+      tags: [Facilities]
+      summary: List a facility's doctor staff (H3)
+      parameters:
+        - $ref: '#/components/parameters/FacilityId'
+      responses:
+        '200':
+          description: Staff.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { data: { type: array, items: { type: object } } }
+    post:
+      tags: [Facilities]
+      summary: Add a staff doctor to this facility (H3)
+      parameters:
+        - $ref: '#/components/parameters/FacilityId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                specialty: { type: string }
+                consultationFee: { type: number }
+              required: [name]
+      responses:
+        '201':
+          description: Created staff user + doctor profile.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+                  doctor: { $ref: '#/components/schemas/Doctor' }
+
+  /facilities/{facilityId}/staff/{userId}:
+    delete:
+      tags: [Facilities]
+      summary: Remove a staff doctor (H3)
+      parameters:
+        - $ref: '#/components/parameters/FacilityId'
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Removed. }
+
+  /pharmacies/{facilityId}/medicines:
+    get:
+      tags: [Pharmacy Medicines]
+      summary: List a pharmacy's medicines (PH3)
+      parameters:
+        - $ref: '#/components/parameters/FacilityId'
+      responses:
+        '200':
+          description: Medicines.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/PharmacyMedicine' }
+    post:
+      tags: [Pharmacy Medicines]
+      summary: Add a medicine manually (PH3)
+      parameters:
+        - $ref: '#/components/parameters/FacilityId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PharmacyMedicineInput' }
+      responses:
+        '201':
+          description: Created medicine.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PharmacyMedicine' }
+
+  /pharmacies/{facilityId}/medicines/import:
+    post:
+      tags: [Pharmacy Medicines]
+      summary: Bulk-import medicines from a parsed CSV/XLSX (PH3)
+      description: The file is parsed client-side (xlsx package); this endpoint just accepts the resulting rows.
+      parameters:
+        - $ref: '#/components/parameters/FacilityId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rows:
+                  type: array
+                  items: { $ref: '#/components/schemas/PharmacyMedicineInput' }
+              required: [rows]
+      responses:
+        '201':
+          description: Created medicines.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/PharmacyMedicine' }
+
+  /pharmacies/{facilityId}/medicines/{medicineId}:
+    patch:
+      tags: [Pharmacy Medicines]
+      summary: Update a medicine's price/quantity (PH3, PH7)
+      parameters:
+        - $ref: '#/components/parameters/FacilityId'
+        - name: medicineId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PharmacyMedicineInput' }
+      responses:
+        '200':
+          description: Updated medicine.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PharmacyMedicine' }
+    delete:
+      tags: [Pharmacy Medicines]
+      summary: Remove a medicine
+      parameters:
+        - $ref: '#/components/parameters/FacilityId'
+        - name: medicineId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Removed. }
+
+  /medicines/search:
+    get:
+      tags: [Pharmacy Medicines]
+      summary: Find nearest pharmacies stocking a medicine (P9)
+      parameters:
+        - name: name
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: In-stock matches with their pharmacy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        medicine: { $ref: '#/components/schemas/PharmacyMedicine' }
+                        facility: { $ref: '#/components/schemas/Facility' }
+
+  /orders:
+    get:
+      tags: [Orders]
+      summary: List orders visible to the caller (P9, PH4, PH6)
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/OrderStatus' }
+      responses:
+        '200':
+          description: Orders, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Order' }
+    post:
+      tags: [Orders]
+      summary: Order or request pickup of medicine from a pharmacy (P9)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderCreateInput' }
+      responses:
+        '201':
+          description: Created order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+
+  /orders/{orderId}:
+    patch:
+      tags: [Orders]
+      summary: Advance an order's status (PH6)
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { status: { $ref: '#/components/schemas/OrderStatus' } }
+      responses:
+        '200':
+          description: Updated order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /reviews:
+    get:
+      tags: [Reviews]
+      summary: List reviews for a facility or doctor (P12)
+      parameters:
+        - name: facilityId
+          in: query
+          schema: { type: string }
+        - name: doctorId
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Reviews, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Review' }
+    post:
+      tags: [Reviews]
+      summary: Leave a rating/review (P12)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewCreateInput' }
+      responses:
+        '201':
+          description: Created review.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Review' }
+
+  /articles:
+    get:
+      tags: [Articles]
+      summary: List articles (published for patients, own for a doctor, filterable by status for admin) (D6)
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ArticleStatus' }
+      responses:
+        '200':
+          description: Articles, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Article' }
+    post:
+      tags: [Articles]
+      summary: Write a health tip/article (doctor only) (D6)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { title: { type: string }, body: { type: string } }
+              required: [title, body]
+      responses:
+        '201':
+          description: Created article (starts `pending_review`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Article' }
+
+  /articles/{articleId}:
+    patch:
+      tags: [Articles]
+      summary: Edit content (author) or change status (admin) (D6)
+      parameters:
+        - name: articleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                body: { type: string }
+                status: { $ref: '#/components/schemas/ArticleStatus' }
+      responses:
+        '200':
+          description: Updated article.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Article' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    mockAuth:
+      type: apiKey
+      in: header
+      name: X-Mock-Role
+      description: |
+        Placeholder auth for the mock server only. Send both `X-Mock-Role`
+        (`patient` | `doctor` | `hospital` | `pharmacy`) and `X-Mock-User-Id`
+        (a seeded user id from `mock-server/src/data/seed.ts`) on every request.
+        Real authentication (OTP, license approval) is a separate, future contract.
+
+  parameters:
+    FacilityId:
+      name: facilityId
+      in: path
+      required: true
+      schema: { type: string }
+    CaseId:
+      name: caseId
+      in: path
+      required: true
+      schema: { type: string }
+    AppointmentId:
+      name: appointmentId
+      in: path
+      required: true
+      schema: { type: string }
+    ChatId:
+      name: chatId
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Pagination:
+      type: object
+      properties:
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+      required: [page, pageSize, total]
+
+    Error:
+      type: object
+      properties:
+        code: { type: string }
+        message: { type: string }
+      required: [code, message]
+
+    GeoPoint:
+      type: object
+      properties:
+        lat: { type: number, format: double }
+        lng: { type: number, format: double }
+      required: [lat, lng]
+
+    Facility:
+      type: object
+      description: A hospital, clinic, or pharmacy (P2, P3, H2, PH2).
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [hospital, clinic, pharmacy] }
+        name: { type: string }
+        specialties:
+          type: array
+          items: { type: string }
+        services:
+          type: array
+          items: { type: string }
+        departments:
+          type: array
+          items: { type: string }
+          description: H2 (hospitals/clinics; typically empty for pharmacies).
+        rating: { type: number, minimum: 0, maximum: 5 }
+        reviewCount: { type: integer }
+        priceLevel: { type: integer, minimum: 1, maximum: 4 }
+        address: { type: string }
+        location: { $ref: '#/components/schemas/GeoPoint' }
+        phone: { type: string }
+        openNow: { type: boolean }
+        hours:
+          type: array
+          items:
+            type: object
+            properties:
+              day: { type: string }
+              open: { type: string }
+              close: { type: string }
+            required: [day, open, close]
+        photoUrl: { type: string }
+      required: [id, type, name, address, location]
+
+    WeeklyAvailabilitySlot:
+      type: object
+      description: A recurring weekly availability window (D3).
+      properties:
+        day: { type: integer, minimum: 0, maximum: 6, description: "0=Sunday..6=Saturday" }
+        start: { type: string, description: "HH:mm" }
+        end: { type: string, description: "HH:mm" }
+      required: [day, start, end]
+
+    Doctor:
+      type: object
+      description: Doctor profile for matching/selection (P5).
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        name: { type: string }
+        specialty: { type: string }
+        facilityId: { type: string }
+        consultationFee: { type: number }
+        rating: { type: number, minimum: 0, maximum: 5 }
+        photoUrl: { type: string }
+        weeklyAvailability:
+          type: array
+          items: { $ref: '#/components/schemas/WeeklyAvailabilitySlot' }
+      required: [id, userId, name, specialty]
+
+    TimeSlot:
+      type: object
+      properties:
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+      required: [start, end]
+
+    CaseStatus:
+      type: string
+      enum: [submitted, accepted, declined, referred, closed]
+
+    CaseAttachment:
+      type: object
+      properties:
+        id: { type: string }
+        url: { type: string, description: "A data: URL in the mock server (P4 photo/file upload, no object storage)." }
+        kind: { type: string, enum: [photo, file] }
+      required: [id, url, kind]
+
+    PrescriptionMedicine:
+      type: object
+      description: One line item of a doctor-authored e-prescription (D5, surfaced to the patient per P8).
+      properties:
+        name: { type: string }
+        dosage: { type: string }
+        instructions: { type: string }
+      required: [name, dosage, instructions]
+
+    Case:
+      type: object
+      description: A patient-written case (P4) and its doctor triage state (D2, D4, D5).
+      properties:
+        id: { type: string }
+        patientId: { type: string }
+        doctorId: { type: string, nullable: true }
+        symptoms: { type: string }
+        durationDays: { type: integer }
+        attachments:
+          type: array
+          items: { $ref: '#/components/schemas/CaseAttachment' }
+        status: { $ref: '#/components/schemas/CaseStatus' }
+        doctorNotes: { type: string, nullable: true }
+        medicines:
+          type: array
+          items: { $ref: '#/components/schemas/PrescriptionMedicine' }
+        referredToFacilityId: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, patientId, symptoms, status, createdAt, updatedAt]
+
+    CaseCreateInput:
+      type: object
+      properties:
+        symptoms: { type: string }
+        durationDays: { type: integer }
+        attachments:
+          type: array
+          items: { $ref: '#/components/schemas/CaseAttachment' }
+        preferredDoctorId:
+          type: string
+          nullable: true
+          description: P5. If omitted, the server auto-matches the doctor with the fewest open cases.
+      required: [symptoms]
+
+    CaseUpdateInput:
+      type: object
+      properties:
+        status: { $ref: '#/components/schemas/CaseStatus' }
+        doctorId: { type: string }
+        doctorNotes: { type: string }
+        medicines:
+          type: array
+          items: { $ref: '#/components/schemas/PrescriptionMedicine' }
+        referredToFacilityId: { type: string }
+
+    AppointmentStatus:
+      type: string
+      enum: [pending_payment, confirmed, cancelled, completed]
+
+    Appointment:
+      type: object
+      description: Scheduled consultation (P6, H4).
+      properties:
+        id: { type: string }
+        patientId: { type: string }
+        doctorId: { type: string }
+        caseId: { type: string, nullable: true }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        status: { $ref: '#/components/schemas/AppointmentStatus' }
+        paymentStatus: { type: string, enum: [unpaid, paid] }
+        fee: { type: number }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, patientId, doctorId, start, end, status, paymentStatus, createdAt, updatedAt]
+
+    AppointmentCreateInput:
+      type: object
+      properties:
+        doctorId: { type: string }
+        caseId: { type: string, nullable: true }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+      required: [doctorId, start, end]
+
+    AppointmentUpdateInput:
+      type: object
+      properties:
+        status: { $ref: '#/components/schemas/AppointmentStatus' }
+        paymentStatus: { type: string, enum: [unpaid, paid] }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+
+    ChatParticipant:
+      type: object
+      properties:
+        userId: { type: string }
+        role: { type: string, enum: [patient, doctor, hospital, pharmacy] }
+        name: { type: string }
+      required: [userId, role, name]
+
+    ChatThread:
+      type: object
+      properties:
+        id: { type: string }
+        participants:
+          type: array
+          items: { $ref: '#/components/schemas/ChatParticipant' }
+        lastMessage: { $ref: '#/components/schemas/ChatMessage' }
+        updatedAt: { type: string, format: date-time }
+      required: [id, participants, updatedAt]
+
+    ChatThreadCreateInput:
+      type: object
+      properties:
+        participantUserId: { type: string }
+        participantRole: { type: string, enum: [patient, doctor, hospital, pharmacy] }
+        firstMessage: { type: string }
+      required: [participantUserId, participantRole]
+
+    ChatMessage:
+      type: object
+      properties:
+        id: { type: string }
+        chatId: { type: string }
+        senderUserId: { type: string }
+        text: { type: string }
+        attachmentUrl: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+      required: [id, chatId, senderUserId, text, createdAt]
+
+    ChatMessageCreateInput:
+      type: object
+      properties:
+        text: { type: string }
+        attachmentUrl: { type: string, nullable: true }
+      required: [text]
+
+    Role:
+      type: string
+      enum: [patient, doctor, hospital, pharmacy, admin]
+
+    User:
+      type: object
+      description: A seeded account (see mock-server/src/data/seed.ts). Stands in for a real session/JWT subject.
+      properties:
+        id: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        name: { type: string }
+        phone: { type: string }
+        facilityId: { type: string }
+        doctorId: { type: string }
+        registrationStatus: { $ref: '#/components/schemas/RegistrationStatus' }
+      required: [id, role, name]
+
+    RegistrationStatus:
+      type: string
+      enum: [pending, approved, rejected]
+
+    Registration:
+      type: object
+      description: A doctor or facility sign-up awaiting admin review (D1, H1, PH1).
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [doctor, facility] }
+        facilityType: { type: string, enum: [hospital, clinic, pharmacy] }
+        name: { type: string }
+        phone: { type: string }
+        specialty: { type: string }
+        licenseUrl: { type: string, description: "A data: URL in the mock server." }
+        status: { $ref: '#/components/schemas/RegistrationStatus' }
+        createdUserId: { type: string }
+        createdFacilityId: { type: string }
+        createdDoctorId: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, kind, name, phone, licenseUrl, status, createdUserId, createdAt, updatedAt]
+
+    RegistrationCreateInput:
+      type: object
+      properties:
+        kind: { type: string, enum: [doctor, facility] }
+        facilityType: { type: string, enum: [hospital, clinic, pharmacy], description: "Required when kind=facility." }
+        name: { type: string }
+        phone: { type: string }
+        specialty: { type: string, description: "Used when kind=doctor." }
+        licenseUrl: { type: string }
+      required: [kind, name, phone, licenseUrl]
+
+    FacilityUpdateInput:
+      type: object
+      properties:
+        name: { type: string }
+        address: { type: string }
+        location: { $ref: '#/components/schemas/GeoPoint' }
+        phone: { type: string }
+        hours:
+          type: array
+          items:
+            type: object
+            properties: { day: { type: string }, open: { type: string }, close: { type: string } }
+        services: { type: array, items: { type: string } }
+        specialties: { type: array, items: { type: string } }
+        departments: { type: array, items: { type: string } }
+        photoUrl: { type: string }
+        openNow: { type: boolean }
+
+    PharmacyMedicine:
+      type: object
+      description: One medicine in a pharmacy's inventory (PH3). Out of stock when quantity is 0.
+      properties:
+        id: { type: string }
+        facilityId: { type: string }
+        name: { type: string }
+        strength: { type: string }
+        form: { type: string }
+        price: { type: number }
+        quantity: { type: integer }
+      required: [id, facilityId, name, price, quantity]
+
+    PharmacyMedicineInput:
+      type: object
+      properties:
+        name: { type: string }
+        strength: { type: string }
+        form: { type: string }
+        price: { type: number }
+        quantity: { type: integer }
+      required: [name, price, quantity]
+
+    OrderStatus:
+      type: string
+      enum: [requested, accepted, preparing, ready, completed, cancelled]
+
+    OrderItem:
+      type: object
+      properties:
+        medicineId: { type: string }
+        name: { type: string }
+        quantity: { type: integer }
+      required: [medicineId, name, quantity]
+
+    Order:
+      type: object
+      description: A patient's medicine order from a pharmacy (P9, PH4, PH6).
+      properties:
+        id: { type: string }
+        patientId: { type: string }
+        pharmacyFacilityId: { type: string }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/OrderItem' }
+        fulfillment: { type: string, enum: [delivery, pickup] }
+        status: { $ref: '#/components/schemas/OrderStatus' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, patientId, pharmacyFacilityId, items, fulfillment, status, createdAt, updatedAt]
+
+    OrderCreateInput:
+      type: object
+      properties:
+        pharmacyFacilityId: { type: string }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/OrderItem' }
+        fulfillment: { type: string, enum: [delivery, pickup] }
+      required: [pharmacyFacilityId, items]
+
+    Review:
+      type: object
+      description: A patient's rating/review of a facility or doctor (P12).
+      properties:
+        id: { type: string }
+        authorUserId: { type: string }
+        authorName: { type: string }
+        facilityId: { type: string }
+        doctorId: { type: string }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        comment: { type: string }
+        createdAt: { type: string, format: date-time }
+      required: [id, authorUserId, authorName, rating, createdAt]
+
+    ReviewCreateInput:
+      type: object
+      properties:
+        facilityId: { type: string }
+        doctorId: { type: string }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        comment: { type: string }
+      required: [rating]
+
+    ArticleStatus:
+      type: string
+      enum: [draft, pending_review, published, rejected]
+
+    Article:
+      type: object
+      description: A doctor-authored health tip/article, published after admin review (D6).
+      properties:
+        id: { type: string }
+        authorDoctorId: { type: string }
+        authorName: { type: string }
+        title: { type: string }
+        body: { type: string }
+        status: { $ref: '#/components/schemas/ArticleStatus' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, authorDoctorId, authorName, title, body, status, createdAt, updatedAt]
+
+    Payout:
+      type: object
+      description: A doctor's earnings payout for a period (D7).
+      properties:
+        id: { type: string }
+        doctorId: { type: string }
+        amount: { type: number }
+        period: { type: string, description: "YYYY-MM" }
+        status: { type: string, enum: [pending, paid] }
+        createdAt: { type: string, format: date-time }
+      required: [id, doctorId, amount, period, status, createdAt]
