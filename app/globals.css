@@ -1,26 +1,86 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f3f6f8;
+  --foreground: #0f172a;
+
+  --color-surface: #ffffff;
+  --color-muted: #64748b;
+  --color-muted-foreground: #94a3b8;
+  --color-border: #e5e9ee;
+
+  --color-primary: #0d9488;
+  --color-primary-hover: #0f766e;
+  --color-primary-foreground: #ffffff;
+  --color-primary-soft: #e6f7f5;
+
+  --color-accent: #a78bfa;
+  --color-accent-soft: #f2eefe;
+
+  --color-success: #16a34a;
+  --color-success-soft: #ecfdf3;
+  --color-warning: #d97706;
+  --color-warning-soft: #fffbeb;
+  --color-danger: #dc2626;
+  --color-danger-soft: #fef2f2;
+
+  --radius-card: 1rem;
+  --radius-control: 0.625rem;
+
+  color-scheme: light;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--color-surface);
+  --color-muted: var(--color-muted);
+  --color-muted-foreground: var(--color-muted-foreground);
+  --color-border: var(--color-border);
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-primary-foreground: var(--color-primary-foreground);
+  --color-primary-soft: var(--color-primary-soft);
+  --color-accent: var(--color-accent);
+  --color-accent-soft: var(--color-accent-soft);
+  --color-success: var(--color-success);
+  --color-success-soft: var(--color-success-soft);
+  --color-warning: var(--color-warning);
+  --color-warning-soft: var(--color-warning-soft);
+  --color-danger: var(--color-danger);
+  --color-danger-soft: var(--color-danger-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root:not(.light) {
+    --background: #0a0f14;
+    --foreground: #e2e8f0;
+    --color-surface: #111b1f;
+    --color-border: #1e2a2e;
+    --color-muted: #94a3b8;
+    --color-muted-foreground: #64748b;
+    --color-primary-soft: #0c2320;
+    --color-accent-soft: #1f1b33;
+    color-scheme: dark;
   }
+}
+
+:root.dark {
+  --background: #0a0f14;
+  --foreground: #e2e8f0;
+  --color-surface: #111b1f;
+  --color-border: #1e2a2e;
+  --color-muted: #94a3b8;
+  --color-muted-foreground: #64748b;
+  --color-primary-soft: #0c2320;
+  --color-accent-soft: #1f1b33;
+  color-scheme: dark;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
