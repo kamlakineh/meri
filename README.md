@@ -1,4 +1,4 @@
-# Tena Health — frontend foundation
+# Meri Health — frontend foundation
 
 A multi-sided health platform (Patient, Doctor, Hospital/Clinic, Pharmacy). This repo currently holds three pieces built to let web and mobile start before the real backend exists:
 
@@ -6,7 +6,6 @@ A multi-sided health platform (Patient, Doctor, Hospital/Clinic, Pharmacy). This
 2. **[mock-server/](mock-server/README.md)** — a stateful mock implementation of that contract.
 3. **This Next.js app** — Tailwind theme, role-based layout, a reusable component library, and English/Amharic/Afaan Oromo translations, with one representative dashboard per role.
 
-See [CLAUDE.md](CLAUDE.md) for the full architecture and what's intentionally out of scope for this pass.
 
 ## Run it
 
