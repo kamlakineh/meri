@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+:root {
+  /* Outer page canvas the app shell floats on — distinct from card surfaces. */
+  --background: #eceef1;
+  --foreground: #0f1115;
+
+  --color-surface: #ffffff;
+  --color-surface-muted: #f6f7f9;
+  --color-muted: #6b7280;
+  --color-muted-foreground: #9ca3af;
+  --color-border: #e8e9ec;
+
+  /* Blue accent: links, focus states, "info" badges, active icon tints. */
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-foreground: #ffffff;
+  --color-primary-soft: #eff6ff;
+
+  /* Near-black ink: primary CTA buttons, active nav text, headings. */
+  --color-ink: #12151a;
+  --color-ink-hover: #262a31;
+  --color-ink-foreground: #ffffff;
+
+  --color-accent: #a78bfa;
+  --color-accent-soft: #f2eefe;
+
+  --color-success: #16a34a;
+  --color-success-soft: #dcfce7;
+  --color-warning: #d97706;
+  --color-warning-soft: #fef3c7;
+  --color-danger: #dc2626;
+  --color-danger-soft: #fee2e2;
+
+  --radius-shell: 1.5rem;
+  --radius-card: 1rem;
+  --radius-control: 0.75rem;
+
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--color-surface);
+  --color-surface-muted: var(--color-surface-muted);
+  --color-muted: var(--color-muted);
+  --color-muted-foreground: var(--color-muted-foreground);
+  --color-border: var(--color-border);
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-primary-foreground: var(--color-primary-foreground);
+  --color-primary-soft: var(--color-primary-soft);
+  --color-ink: var(--color-ink);
+  --color-ink-hover: var(--color-ink-hover);
+  --color-ink-foreground: var(--color-ink-foreground);
+  --color-accent: var(--color-accent);
+  --color-accent-soft: var(--color-accent-soft);
+  --color-success: var(--color-success);
+  --color-success-soft: var(--color-success-soft);
+  --color-warning: var(--color-warning);
+  --color-warning-soft: var(--color-warning-soft);
+  --color-danger: var(--color-danger);
+  --color-danger-soft: var(--color-danger-soft);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --background: #07090c;
+    --foreground: #e7e9ec;
+    --color-surface: #121418;
+    --color-surface-muted: #181b20;
+    --color-border: #23262c;
+    --color-muted: #9ca3af;
+    --color-muted-foreground: #6b7280;
+    --color-primary-soft: #0f1e3d;
+    --color-ink: #e7e9ec;
+    --color-ink-hover: #ffffff;
+    --color-ink-foreground: #0f1115;
+    --color-accent-soft: #1f1b33;
+    color-scheme: dark;
+  }
+}
+
+:root.dark {
+  --background: #07090c;
+  --foreground: #e7e9ec;
+  --color-surface: #121418;
+  --color-surface-muted: #181b20;
+  --color-border: #23262c;
+  --color-muted: #9ca3af;
+  --color-muted-foreground: #6b7280;
+  --color-primary-soft: #0f1e3d;
+  --color-ink: #e7e9ec;
+  --color-ink-hover: #ffffff;
+  --color-ink-foreground: #0f1115;
+  --color-accent-soft: #1f1b33;
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
